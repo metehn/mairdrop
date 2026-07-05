@@ -332,7 +332,11 @@ SocketService.connect(currentDeviceId, {
     },
     onSignal: (data) => WebRTCService.handleSignal(data, currentDeviceId),
     onRoomEvent: (event) => RoomDialog.handleEvent(event),
-    onVisibilityEvent: (event) => DiscoveryManager.handleEvent(event)
+    onVisibilityEvent: (event) => DiscoveryManager.handleEvent(event),
+    onRegistered: () => {
+        if (DiscoveryManager.netHidden) SocketService.hideFromNetwork();
+        if (DiscoveryManager.roomHidden) SocketService.hideFromRoom();
+    }
 });
 
 // --- File picker ---

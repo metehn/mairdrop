@@ -36,6 +36,12 @@ public class VisibilityController {
         deviceService.setHidden(deviceId, true);
         broadcastGroup(group);
 
+        // Send the hiding device its updated peer list (it's now excluded from the loop above)
+        if (group != null) {
+            messagingTemplate.convertAndSend("/topic/devices/" + deviceId,
+                    deviceService.getActiveDevicesInGroup(group));
+        }
+
         messagingTemplate.convertAndSend("/topic/visibility/" + deviceId,
                 Map.of("type", "NETWORK_HIDDEN"));
         log.info("Device {} hidden from network", deviceId);
@@ -104,8 +110,8 @@ public class VisibilityController {
         if (group == null) return;
         List<String> devices = deviceService.getActiveDevicesInGroup(group);
         for (String id : devices) {
-            // Skip devices in a room — their room view must not be overwritten by a network broadcast
-            if (roomService.getRoomCode(id) == null) {
+            // Skip devices in a room or hidden-from-room — their room view must not be overwritten
+            if (roomService.getRoomCode(id) == null && deviceService.getPendingRoomCode(id) == null) {
                 messagingTemplate.convertAndSend("/topic/devices/" + id, devices);
             }
         }

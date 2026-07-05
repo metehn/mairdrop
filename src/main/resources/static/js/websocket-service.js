@@ -67,6 +67,7 @@ const SocketService = {
             });
 
             stompClient.send('/app/register', {}, deviceId);
+            if (callbacks.onRegistered) callbacks.onRegistered();
 
             const savedRoomId = sessionStorage.getItem('room_id');
             if (savedRoomId) {

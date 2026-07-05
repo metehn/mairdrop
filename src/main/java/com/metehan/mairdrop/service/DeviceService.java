@@ -59,6 +59,16 @@ public class DeviceService {
                 .toList();
     }
 
+    public List<String> getAllActiveDevicesInGroup(String group) {
+        if (group == null) {
+            return List.of();
+        }
+        return devices.values().stream()
+                .filter(d -> d.isActive() && group.equals(d.getNetworkGroup()))
+                .map(DeviceSession::getDeviceId)
+                .toList();
+    }
+
     public String getDeviceIdBySessionId(String sId) {
         if (sId == null) return null;
         return sessionToDevice.get(sId);

@@ -48,6 +48,7 @@ public class RoomService {
             code = generateCode();
             room = new Room(code);
         } while (rooms.putIfAbsent(code, room) != null);
+        leaveRoom(deviceId);
         addToRoom(deviceId, room);
         log.info("Room {} created by device {}", code, deviceId);
         return code;
@@ -62,6 +63,7 @@ public class RoomService {
         }
         cancelCloseTimer(room);
         leaveRoom(deviceId);
+        cancelCloseTimer(room); // leaveRoom may have re-scheduled close if room was momentarily empty
         addToRoom(deviceId, room);
         log.info("Device {} joined room {}", deviceId, code);
         return true;

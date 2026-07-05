@@ -42,10 +42,11 @@ public class WebSocketController {
     }
 
     private void broadcastList(String group) {
-        List<String> devices = deviceService.getActiveDevicesInGroup(group);
-        log.info("Group [{}] The updated list is being published: {}", group, devices);
-        for (String id : devices) {
-            messagingTemplate.convertAndSend("/topic/devices/" + id, devices);
+        List<String> visibleDevices = deviceService.getActiveDevicesInGroup(group);
+        List<String> allDevices = deviceService.getAllActiveDevicesInGroup(group);
+        log.info("Group [{}] The updated list is being published: {}", group, visibleDevices);
+        for (String id : allDevices) {
+            messagingTemplate.convertAndSend("/topic/devices/" + id, visibleDevices);
         }
     }
 }

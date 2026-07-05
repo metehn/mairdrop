@@ -42,10 +42,11 @@ public class WebSocketEventListener {
             String group = deviceService.getGroup(deviceId);
             deviceService.unregisterDevice(deviceId, sessionId);
             if (group != null) {
-                List<String> devices = deviceService.getActiveDevicesInGroup(group);
+                List<String> visibleDevices = deviceService.getActiveDevicesInGroup(group);
+                List<String> allDevices = deviceService.getAllActiveDevicesInGroup(group);
                 log.info("Group [{}] being updated after disconnect..", group);
-                for (String id : devices) {
-                    messagingTemplate.convertAndSend("/topic/devices/" + id, devices);
+                for (String id : allDevices) {
+                    messagingTemplate.convertAndSend("/topic/devices/" + id, visibleDevices);
                 }
             }
         }
