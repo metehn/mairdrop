@@ -1,7 +1,9 @@
 package com.metehan.mairdrop.controller;
 
 import com.metehan.mairdrop.service.DeviceService;
+import com.metehan.mairdrop.service.RoomJoinRateLimiter;
 import com.metehan.mairdrop.service.RoomService;
+import com.metehan.mairdrop.util.CommonConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -19,12 +21,15 @@ public class RoomController {
 
     private final RoomService roomService;
     private final DeviceService deviceService;
+    private final RoomJoinRateLimiter roomJoinRateLimiter;
     private final SimpMessagingTemplate messagingTemplate;
 
     public RoomController(RoomService roomService, DeviceService deviceService,
+                          RoomJoinRateLimiter roomJoinRateLimiter,
                           SimpMessagingTemplate messagingTemplate) {
         this.roomService = roomService;
         this.deviceService = deviceService;
+        this.roomJoinRateLimiter = roomJoinRateLimiter;
         this.messagingTemplate = messagingTemplate;
     }
 
@@ -50,11 +55,22 @@ public class RoomController {
         String deviceId = resolveDeviceId(headerAccessor);
         if (deviceId == null) return;
 
+        // Throttle guessing before touching the room registry, so the 5-letter code space can't be
+        // brute-forced through the ROOM_JOINED/ROOM_INVALID oracle.
+        String rateKey = rateLimitKey(headerAccessor, deviceId);
+        if (!roomJoinRateLimiter.isAllowed(rateKey)) {
+            log.warn("Room join throttled for device {} (too many failed attempts)", deviceId);
+            messagingTemplate.convertAndSend("/topic/room/" + deviceId,
+                    Map.of("type", "ROOM_RATE_LIMITED"));
+            return;
+        }
+
         roomCode = roomCode.trim().toUpperCase();
         String oldRoomCode = roomService.getRoomCode(deviceId);
 
         boolean joined = roomService.joinRoom(deviceId, roomCode);
         if (!joined) {
+            roomJoinRateLimiter.recordFailure(rateKey);
             // Echo the attempted code so the client can tell an expired auto-rejoin (matches the
             // room it thinks it is in — clear it) from a mistyped manual join (leave state alone).
             messagingTemplate.convertAndSend("/topic/room/" + deviceId,
@@ -110,5 +126,13 @@ public class RoomController {
             log.warn("No device found for session {}", sessionId);
         }
         return deviceId;
+    }
+
+    // Rate-limit by the client IP resolved at the handshake (a brute-forcer can rotate device ids by
+    // reconnecting, but not its address); fall back to the device id when no IP was recorded.
+    private String rateLimitKey(SimpMessageHeaderAccessor headerAccessor, String deviceId) {
+        Map<String, Object> attributes = headerAccessor.getSessionAttributes();
+        Object clientIp = (attributes != null) ? attributes.get(CommonConstants.SESSION_CLIENT_IP) : null;
+        return (clientIp != null) ? clientIp.toString() : deviceId;
     }
 }

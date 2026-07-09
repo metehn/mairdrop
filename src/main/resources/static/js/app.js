@@ -124,6 +124,10 @@ const RoomDialog = {
                 }
                 break;
             }
+            case 'ROOM_RATE_LIMITED':
+                // Too many failed join attempts from this client — keep current room state intact.
+                UI.showAlert('Too many attempts. Please wait a moment and try again.', 'error');
+                break;
             case 'ROOM_LEFT':
                 this.clearRoom();
                 this.close();

@@ -26,6 +26,7 @@ public class HttpHandshakeInterceptor implements HandshakeInterceptor {
             String group = isLocalNetwork(ip) ? CommonConstants.LOCAL_NETWORK : ip;
 
             attributes.put(CommonConstants.NETWORK_GROUP, group);
+            attributes.put(CommonConstants.SESSION_CLIENT_IP, ip);
             log.info("Handshake IP: {} -> Group: {}", ip, group);
         }
         return true;

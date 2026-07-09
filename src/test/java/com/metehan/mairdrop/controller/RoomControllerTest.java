@@ -1,6 +1,7 @@
 package com.metehan.mairdrop.controller;
 
 import com.metehan.mairdrop.service.DeviceService;
+import com.metehan.mairdrop.service.RoomJoinRateLimiter;
 import com.metehan.mairdrop.service.RoomService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,6 +23,7 @@ class RoomControllerTest {
 
     @Mock private RoomService roomService;
     @Mock private DeviceService deviceService;
+    @Mock private RoomJoinRateLimiter roomJoinRateLimiter;
     @Mock private SimpMessagingTemplate messagingTemplate;
     @Mock private SimpMessageHeaderAccessor headerAccessor;
 
@@ -34,6 +36,8 @@ class RoomControllerTest {
     @BeforeEach
     void setUp() {
         when(headerAccessor.getSessionId()).thenReturn(sessionId);
+        // Joins are allowed by default; the rate-limit test overrides this.
+        lenient().when(roomJoinRateLimiter.isAllowed(anyString())).thenReturn(true);
     }
 
     @Test
@@ -99,6 +103,20 @@ class RoomControllerTest {
         verify(messagingTemplate).convertAndSend("/topic/room/" + deviceId,
                 Map.of("type", "ROOM_INVALID", "roomCode", "XXXXX"));
         verify(roomService, never()).broadcastRoomUpdate(any());
+        verify(roomJoinRateLimiter).recordFailure(anyString());
+    }
+
+    @Test
+    @DisplayName("joinRoom: a rate-limited client is refused without touching the room service")
+    void shouldRefuseJoinWhenRateLimited() {
+        when(deviceService.getDeviceIdBySessionId(sessionId)).thenReturn(deviceId);
+        when(roomJoinRateLimiter.isAllowed(anyString())).thenReturn(false);
+
+        roomController.joinRoom("ABCDE", headerAccessor);
+
+        verify(roomService, never()).joinRoom(any(), any());
+        verify(messagingTemplate).convertAndSend("/topic/room/" + deviceId,
+                Map.of("type", "ROOM_RATE_LIMITED"));
     }
 
     @Test
