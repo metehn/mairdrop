@@ -23,7 +23,7 @@ test.describe('File transfer', () => {
       await pageB.goto('/');
 
       const nameB = await pageB.locator('#deviceIdSpan').textContent();
-      const deviceIdB = await pageB.evaluate(() => localStorage.getItem('deviceId'));
+      const deviceIdB = await pageB.evaluate(() => sessionStorage.getItem('deviceId'));
       await expect(pageA.locator('#deviceList')).toContainText(nameB);
 
       await pageA.setInputFiles('#fileInput', largeFilePath);

@@ -122,4 +122,62 @@ class DeviceServiceTest {
                 "Device with new session must not be removed by stale disconnect");
         assertFalse(deviceService.getActiveDevicesInGroup("groupA").isEmpty());
     }
+
+    @Test
+    @DisplayName("Case 11: unregisterDevice returns true only when it actually removes the device")
+    void unregisterReturnValueReflectsRemoval() {
+        deviceService.registerDevice("dev1", "sess1", "groupA");
+
+        assertTrue(deviceService.unregisterDevice("dev1", "sess1"));
+        assertFalse(deviceService.unregisterDevice("dev1", "sess1"), "already gone");
+        assertFalse(deviceService.unregisterDevice("ghost", "sX"), "never existed");
+    }
+
+    @Test
+    @DisplayName("Case 12: unregister with a stale session returns false and keeps the device")
+    void unregisterReturnsFalseForStaleSession() {
+        deviceService.registerDevice("dev1", "new-sess", "groupA");
+
+        assertFalse(deviceService.unregisterDevice("dev1", "old-sess"));
+        assertEquals("dev1", deviceService.getDeviceIdBySessionId("new-sess"));
+    }
+
+    @Test
+    @DisplayName("Case 13: re-registering an existing id with the wrong token is rejected (id takeover)")
+    void shouldRejectRegistrationWithMismatchedToken() {
+        assertTrue(deviceService.registerDevice("dev1", "owner-token", "sess1", "groupA"));
+
+        boolean accepted = deviceService.registerDevice("dev1", "attacker-token", "sess2", "groupA");
+
+        assertFalse(accepted, "A different token must not be allowed to take over the device id");
+        assertEquals("dev1", deviceService.getDeviceIdBySessionId("sess1"),
+                "The legitimate owner's session must survive the hijack attempt");
+        assertNull(deviceService.getDeviceIdBySessionId("sess2"));
+    }
+
+    @Test
+    @DisplayName("Case 14: re-registering with the matching token (legit reconnect) is accepted")
+    void shouldAcceptReconnectWithMatchingToken() {
+        deviceService.registerDevice("dev1", "owner-token", "sess1", "groupA");
+
+        boolean accepted = deviceService.registerDevice("dev1", "owner-token", "sess2", "groupA");
+
+        assertTrue(accepted);
+        assertNull(deviceService.getDeviceIdBySessionId("sess1"), "old session cleaned up");
+        assertEquals("dev1", deviceService.getDeviceIdBySessionId("sess2"));
+    }
+
+    @Test
+    @DisplayName("Case 15: visibility state (hidden / pending room) survives a reconnect")
+    void shouldPreserveHiddenAndPendingRoomAcrossReRegister() {
+        deviceService.registerDevice("dev1", "owner-token", "sess1", "groupA");
+        deviceService.setHidden("dev1", true);
+        deviceService.setPendingRoomCode("dev1", "ABCDE");
+
+        deviceService.registerDevice("dev1", "owner-token", "sess2", "groupA");
+
+        assertTrue(deviceService.getActiveDevicesInGroup("groupA").isEmpty(),
+                "hidden device must not reappear in the visible list after reconnect");
+        assertEquals("ABCDE", deviceService.getPendingRoomCode("dev1"));
+    }
 }

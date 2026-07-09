@@ -2,6 +2,18 @@
 // This allows multiple concurrent transfers without state collisions.
 const connections = new Map();
 
+// Deferred "hide the progress bar" timers, keyed by remote device id. closeConnection hides the bar
+// 3s after teardown; if a new transfer to the same device starts inside that window we must cancel
+// the stale timer, otherwise it hides the new transfer's live progress bar.
+const pendingHideTimers = new Map();
+const cancelPendingHide = (remoteDeviceId) => {
+    const t = pendingHideTimers.get(remoteDeviceId);
+    if (t) {
+        clearTimeout(t);
+        pendingHideTimers.delete(remoteDeviceId);
+    }
+};
+
 const ICE_SERVERS = (() => {
     try {
         const parsed = JSON.parse(ICE_SERVERS_JSON);
@@ -105,7 +117,12 @@ const closeConnection = (remoteDeviceId) => {
     connections.delete(remoteDeviceId);
 
     if (typeof UI !== 'undefined' && UI.hideProgress) {
-        setTimeout(() => UI.hideProgress(remoteDeviceId), 3000);
+        cancelPendingHide(remoteDeviceId);
+        const timer = setTimeout(() => {
+            pendingHideTimers.delete(remoteDeviceId);
+            UI.hideProgress(remoteDeviceId);
+        }, 3000);
+        pendingHideTimers.set(remoteDeviceId, timer);
     }
 
     // Let the device list re-render so this peer's "Sending..." state clears.
@@ -586,7 +603,7 @@ const handleIncomingMessage = (conn, remoteId, data) => {
     // "transfer could not be confirmed" failure before we send the real progress-ack.
     trySendMessage(conn.dataChannel, { type: 'alive' });
 
-    finalizeReceivedFile(remoteId, fileMeta, chunks, total === 1)
+    finalizeReceivedFile(conn, remoteId, fileMeta, chunks, total === 1)
         .then((ok) => {
             // Only ack the final byte count once the file has actually been
             // verified/saved — an integrity failure must not make the sender
@@ -599,7 +616,7 @@ const handleIncomingMessage = (conn, remoteId, data) => {
         });
 };
 
-const finalizeReceivedFile = async (remoteId, fileMeta, chunks, isOnlyFile) => {
+const finalizeReceivedFile = async (conn, remoteId, fileMeta, chunks, isOnlyFile) => {
     const blob = new Blob(chunks);
 
     if (fileMeta.hash) {
@@ -607,10 +624,16 @@ const finalizeReceivedFile = async (remoteId, fileMeta, chunks, isOnlyFile) => {
         const ok = await verifyBlobHash(blob, fileMeta.hash);
         if (!ok) {
             UI.showAlert('Integrity check FAILED for ' + fileMeta.name + ' — file dropped.', 'error');
-            const conn = connections.get(remoteId);
             if (conn) trySendMessage(conn.dataChannel, { type: 'integrity-error', name: fileMeta.name });
             return false;
         }
+    }
+
+    // If the connection was torn down (e.g. ICE dropped) while we were verifying, the user has
+    // already seen a failure alert. Don't also save the file and show "received" — that pair of
+    // contradictory messages is the bug. Stay consistent with the failure the user saw.
+    if (conn && conn.aborted) {
+        return false;
     }
 
     const url = URL.createObjectURL(blob);
@@ -640,6 +663,7 @@ const WebRTCService = {
         const conn = newConnectionState();
         conn.files = files;
         connections.set(targetId, conn);
+        cancelPendingHide(targetId); // don't let a just-finished transfer's hide timer hide this one
         if (typeof onActiveTransfersChanged === 'function') onActiveTransfersChanged();
 
         try {
@@ -796,6 +820,7 @@ const WebRTCService = {
                 conn = newConnectionState();
                 connections.set(remoteId, conn);
             }
+            cancelPendingHide(remoteId); // don't let a prior transfer's hide timer hide this one
 
             const accepted = await showAcceptDialog(remoteId, files, totalSize);
             if (accepted) {
@@ -903,7 +928,13 @@ const WebRTCService = {
 
             await conn.peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
             for (const candidate of conn.pendingCandidates) {
-                await conn.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                // Isolate each candidate: one malformed/duplicate entry must not abort the whole
+                // accept flow — the remaining valid candidates can still establish the connection.
+                try {
+                    await conn.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) {
+                    console.warn('Failed to flush queued ICE (receiver):', e);
+                }
             }
             conn.pendingCandidates = [];
 

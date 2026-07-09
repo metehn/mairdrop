@@ -8,6 +8,7 @@ public class DeviceSession {
     private long lastSeen;
     private boolean hidden = false;
     private String pendingRoomCode = null;
+    private String token = null;
 
     public DeviceSession(String deviceId, String sessionId, String networkGroup) {
         this.deviceId = deviceId;
@@ -30,4 +31,6 @@ public class DeviceSession {
     public void setHidden(boolean hidden) { this.hidden = hidden; }
     public String getPendingRoomCode() { return pendingRoomCode; }
     public void setPendingRoomCode(String code) { this.pendingRoomCode = code; }
+    public String getToken() { return token; }
+    public void setToken(String token) { this.token = token; }
 }

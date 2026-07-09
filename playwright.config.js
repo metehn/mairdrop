@@ -13,9 +13,10 @@ module.exports = defineConfig({
   use: {
     baseURL: 'http://localhost:8080',
     trace: 'retain-on-failure',
-    // null lets the page fill the actual (maximized, in --headed) browser window
-    // instead of being capped to Playwright's default fixed viewport size.
-    viewport: null,
+    // A fixed viewport (rather than null) is required: with a null viewport the page has no
+    // defined size and elements never become "actionable", so every click times out — headless
+    // in CI and headed under a virtual display alike.
+    viewport: { width: 1280, height: 900 },
     launchOptions: {
       // SLOWMO=500 npx playwright test --headed to watch actions happen at a human pace.
       ...(parseInt(process.env.SLOWMO, 10) > 0 ? { slowMo: parseInt(process.env.SLOWMO, 10) } : {}),
@@ -24,12 +25,11 @@ module.exports = defineConfig({
         // browser contexts on the same machine can't resolve each other's, so WebRTC file
         // transfer tests need real local IPs to find a direct candidate pair.
         '--disable-features=WebRtcHideLocalIpsWithMdns',
-        '--start-maximized',
       ],
     },
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: null } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 900 } } },
   ],
   webServer: {
     command: './mvnw -q -Dcheckstyle.skip=true -Djacoco.skip=true spring-boot:run',

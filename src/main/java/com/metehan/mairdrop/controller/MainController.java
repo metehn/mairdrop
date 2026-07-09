@@ -2,6 +2,8 @@ package com.metehan.mairdrop.controller;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -15,6 +17,7 @@ import java.util.Map;
 @Controller
 public class MainController {
 
+    private static final Logger log = LoggerFactory.getLogger(MainController.class);
     private static final String DEFAULT_STUN_URL = "stun:stun.l.google.com:19302";
     private static final String DEFAULT_ICE_SERVERS_JSON =
             "[{\"urls\":\"" + DEFAULT_STUN_URL + "\"}]";
@@ -47,12 +50,15 @@ public class MainController {
         stun.put("urls", DEFAULT_STUN_URL);
         iceServers.add(stun);
 
-        if (!turnUrl.isBlank()) {
+        if (!turnUrl.isBlank() && !turnUsername.isBlank() && !turnCredential.isBlank()) {
             Map<String, String> turn = new LinkedHashMap<>();
             turn.put("urls", turnUrl);
             turn.put("username", turnUsername);
             turn.put("credential", turnCredential);
             iceServers.add(turn);
+        } else if (!turnUrl.isBlank()) {
+            log.warn("webrtc.turn.url is set but username/credential is missing; "
+                    + "skipping TURN and serving STUN only to avoid a broken ICE server entry");
         }
 
         try {

@@ -110,9 +110,20 @@ const RoomDialog = {
                 this.close();
                 DiscoveryManager.onRoomJoined();
                 break;
-            case 'ROOM_INVALID':
-                UI.showAlert('Room not found. Check the code and try again.', 'error');
+            case 'ROOM_INVALID': {
+                // If the invalid code is the room we believe we're in (an auto-rejoin of an expired
+                // room after reconnect), clear the stale state so we stop retrying it. A different
+                // code is just a mistyped manual join — show the error and keep our current room.
+                const saved = sessionStorage.getItem('room_id');
+                if (event.roomCode && (event.roomCode === this.currentCode || event.roomCode === saved)) {
+                    this.clearRoom();
+                    DiscoveryManager.onRoomLeft();
+                    UI.showAlert('Room has expired. Please create or join a new room.', 'error');
+                } else {
+                    UI.showAlert('Room not found. Check the code and try again.', 'error');
+                }
                 break;
+            }
             case 'ROOM_LEFT':
                 this.clearRoom();
                 this.close();
@@ -129,8 +140,27 @@ const generateDeviceId = () => {
     return 'dev_' + Math.random().toString(36).substr(2, 9);
 };
 
-let currentDeviceId = localStorage.getItem('deviceId') || generateDeviceId();
-localStorage.setItem('deviceId', currentDeviceId);
+const generateToken = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID().replace(/-/g, '');
+    }
+    return Math.random().toString(36).substr(2) + Math.random().toString(36).substr(2);
+};
+
+// Per-tab identity. sessionStorage keeps the id/token stable across reloads of THIS tab but gives
+// every tab its own — two tabs sharing one device id would both answer the same incoming transfer,
+// and the tab the user ignores auto-declines it out from under the one that accepted. The token is
+// a secret this tab keeps so no other client on the network can re-register under its device id.
+let currentDeviceId = sessionStorage.getItem('deviceId');
+if (!currentDeviceId) {
+    currentDeviceId = generateDeviceId();
+    sessionStorage.setItem('deviceId', currentDeviceId);
+}
+let deviceToken = sessionStorage.getItem('deviceToken');
+if (!deviceToken) {
+    deviceToken = generateToken();
+    sessionStorage.setItem('deviceToken', deviceToken);
+}
 // Show the human-readable name so the header matches what other peers see for me.
 document.getElementById('deviceIdSpan').textContent = NameGenerator.getDisplayName(currentDeviceId);
 
@@ -249,10 +279,12 @@ const DiscoveryManager = {
         this.roomHidden = false;
         this._updateRoomBadge();
         if (!this.netHidden) {
+            // Network was visible — auto-hide it and remember that WE did, so we can restore it on
+            // leave. If it was already hidden we leave netHiddenByRoom untouched: keep it true when
+            // a previous room auto-hid (switching room→room must still restore on final leave), and
+            // false when the user hid manually (their choice, not ours to undo).
             this.netHiddenByRoom = true;
             SocketService.hideFromNetwork();
-        } else {
-            this.netHiddenByRoom = false; // user already hid manually — not our hide to undo
         }
     },
 
@@ -284,10 +316,11 @@ const DiscoveryManager = {
                 this._updateRoomBadge();
                 break;
             case 'ROOM_INVALID':
-                // Pending room expired — clear room UI
-                this.roomHidden = false;
-                this._updateRoomBadge();
+                // A pending (hidden-from-room) room expired before we could show ourselves back in
+                // it. Clear the room UI and run the normal leave path so an auto-hidden network is
+                // restored too — otherwise the device is left invisible on the network with no room.
                 RoomDialog.clearRoom();
+                this.onRoomLeft();
                 UI.showAlert('Room has expired. Please create or join a new room.', 'error');
                 break;
         }
@@ -323,6 +356,7 @@ if (urlParams.has('room_id')) {
 
 // --- WebSocket / device list ---
 SocketService.connect(currentDeviceId, {
+    token: deviceToken,
     onDevicesUpdate: (devices) => {
         latestDevices = devices;
         refreshDeviceList();

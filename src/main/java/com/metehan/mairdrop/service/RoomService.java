@@ -107,12 +107,20 @@ public class RoomService {
     }
 
     private void scheduleClose(Room room) {
-        ScheduledFuture<?> timer = scheduler.schedule(() -> {
-            rooms.remove(room.getCode());
-            log.info("Room {} removed after grace period", room.getCode());
-        }, GRACE_PERIOD_MINUTES, TimeUnit.MINUTES);
+        ScheduledFuture<?> timer = scheduler.schedule(() -> closeIfStillEmpty(room),
+                GRACE_PERIOD_MINUTES, TimeUnit.MINUTES);
         room.setCloseTimer(timer);
         log.info("Room {} grace period started ({} min)", room.getCode(), GRACE_PERIOD_MINUTES);
+    }
+
+    // Runs under the same lock as join/leave so a device joining at the exact moment the timer
+    // fires can't be dropped into a room that is being removed. remove(key, value) also guards
+    // against evicting a different room that happens to have reused this code.
+    private synchronized void closeIfStillEmpty(Room room) {
+        if (room.getDeviceIds().isEmpty()) {
+            rooms.remove(room.getCode(), room);
+            log.info("Room {} removed after grace period", room.getCode());
+        }
     }
 
     private void cancelCloseTimer(Room room) {

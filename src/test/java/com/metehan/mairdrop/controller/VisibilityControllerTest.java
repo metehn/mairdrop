@@ -1,6 +1,7 @@
 package com.metehan.mairdrop.controller;
 
 import com.metehan.mairdrop.service.DeviceService;
+import com.metehan.mairdrop.service.GroupBroadcaster;
 import com.metehan.mairdrop.service.RoomService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,6 +23,7 @@ class VisibilityControllerTest {
 
     @Mock private DeviceService deviceService;
     @Mock private RoomService roomService;
+    @Mock private GroupBroadcaster groupBroadcaster;
     @Mock private SimpMessagingTemplate messagingTemplate;
     @Mock private SimpMessageHeaderAccessor headerAccessor;
 
@@ -38,15 +40,15 @@ class VisibilityControllerTest {
     }
 
     @Test
-    @DisplayName("hideFromNetwork: sets hidden and sends NETWORK_HIDDEN")
+    @DisplayName("hideFromNetwork: sets hidden, re-broadcasts the group, and sends NETWORK_HIDDEN")
     void shouldHideFromNetwork() {
         when(deviceService.getDeviceIdBySessionId(sessionId)).thenReturn(deviceId);
         when(deviceService.getGroup(deviceId)).thenReturn(group);
-        when(deviceService.getActiveDevicesInGroup(group)).thenReturn(List.of("dev2"));
 
         visibilityController.hideFromNetwork(headerAccessor);
 
         verify(deviceService).setHidden(deviceId, true);
+        verify(groupBroadcaster).broadcastGroup(group);
         verify(messagingTemplate).convertAndSend("/topic/visibility/" + deviceId,
                 Map.of("type", "NETWORK_HIDDEN"));
     }
@@ -59,47 +61,19 @@ class VisibilityControllerTest {
         visibilityController.hideFromNetwork(headerAccessor);
 
         verify(deviceService, never()).setHidden(any(), anyBoolean());
+        verify(groupBroadcaster, never()).broadcastGroup(any());
     }
 
     @Test
-    @DisplayName("hideFromNetwork: skips group broadcast when group is null")
-    void shouldSkipGroupBroadcastOnHideWhenGroupNull() {
-        when(deviceService.getDeviceIdBySessionId(sessionId)).thenReturn(deviceId);
-        when(deviceService.getGroup(deviceId)).thenReturn(null);
-
-        visibilityController.hideFromNetwork(headerAccessor);
-
-        verify(deviceService, never()).getActiveDevicesInGroup(any());
-        verify(messagingTemplate).convertAndSend("/topic/visibility/" + deviceId,
-                Map.of("type", "NETWORK_HIDDEN"));
-    }
-
-    @Test
-    @DisplayName("hideFromNetwork: skips device-list broadcast to a group member that is in a room")
-    void shouldNotOverwriteRoomDeviceListOnNetworkBroadcast() {
-        String deviceInRoom = "dev2";
-        when(deviceService.getDeviceIdBySessionId(sessionId)).thenReturn(deviceId);
-        when(deviceService.getGroup(deviceId)).thenReturn(group);
-        when(deviceService.getActiveDevicesInGroup(group)).thenReturn(List.of(deviceId, deviceInRoom));
-        when(roomService.getRoomCode(deviceId)).thenReturn(null);
-        when(roomService.getRoomCode(deviceInRoom)).thenReturn("ABCDE");
-
-        visibilityController.hideFromNetwork(headerAccessor);
-
-        verify(messagingTemplate, never()).convertAndSend(eq("/topic/devices/" + deviceInRoom), anyList());
-        verify(messagingTemplate).convertAndSend(eq("/topic/devices/" + deviceId), anyList());
-    }
-
-    @Test
-    @DisplayName("showOnNetwork: sets visible and sends NETWORK_VISIBLE")
+    @DisplayName("showOnNetwork: clears hidden, re-broadcasts the group, and sends NETWORK_VISIBLE")
     void shouldShowOnNetwork() {
         when(deviceService.getDeviceIdBySessionId(sessionId)).thenReturn(deviceId);
         when(deviceService.getGroup(deviceId)).thenReturn(group);
-        when(deviceService.getActiveDevicesInGroup(group)).thenReturn(List.of("dev1", "dev2"));
 
         visibilityController.showOnNetwork(headerAccessor);
 
         verify(deviceService).setHidden(deviceId, false);
+        verify(groupBroadcaster).broadcastGroup(group);
         verify(messagingTemplate).convertAndSend("/topic/visibility/" + deviceId,
                 Map.of("type", "NETWORK_VISIBLE"));
     }
@@ -115,7 +89,7 @@ class VisibilityControllerTest {
     }
 
     @Test
-    @DisplayName("hideFromRoom: leaves room, restores network view, and sends ROOM_HIDDEN")
+    @DisplayName("hideFromRoom: leaves room, restores this device's network view, and sends ROOM_HIDDEN")
     void shouldHideFromRoom() {
         when(deviceService.getDeviceIdBySessionId(sessionId)).thenReturn(deviceId);
         when(roomService.leaveRoom(deviceId)).thenReturn("ABCDE");

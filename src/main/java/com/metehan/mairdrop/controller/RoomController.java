@@ -55,8 +55,10 @@ public class RoomController {
 
         boolean joined = roomService.joinRoom(deviceId, roomCode);
         if (!joined) {
+            // Echo the attempted code so the client can tell an expired auto-rejoin (matches the
+            // room it thinks it is in — clear it) from a mistyped manual join (leave state alone).
             messagingTemplate.convertAndSend("/topic/room/" + deviceId,
-                    Map.of("type", "ROOM_INVALID"));
+                    Map.of("type", "ROOM_INVALID", "roomCode", roomCode));
             return;
         }
 

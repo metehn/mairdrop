@@ -97,10 +97,13 @@ class HttpHandshakeInterceptorTest {
     }
 
     @Test
-    @DisplayName("Case 6: Should handle X-Forwarded-For header (Proxy Case)")
+    @DisplayName("Case 6: Trusts X-Forwarded-For only from a private proxy, taking the rightmost hop")
     void shouldHandleXForwardedForHeader() {
-        String proxyIp = "192.168.10.5, 8.8.8.8"; // First one should be picked
-        when(httpServletRequest.getHeader(CommonConstants.X_FORWARDED_FOR)).thenReturn(proxyIp);
+        // Direct peer is our own reverse proxy (loopback). The rightmost XFF entry is the address
+        // the proxy actually observed; the leftmost is attacker-supplied noise that must be ignored.
+        when(httpServletRequest.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(httpServletRequest.getHeader(CommonConstants.X_FORWARDED_FOR))
+                .thenReturn("8.8.8.8, 192.168.10.5");
 
         interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
 
@@ -185,5 +188,64 @@ class HttpHandshakeInterceptorTest {
         interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
 
         assertEquals(CommonConstants.LOCAL_NETWORK, attributes.get(CommonConstants.NETWORK_GROUP));
+    }
+
+    @Test
+    @DisplayName("Case 15: A direct (public) client cannot spoof X-Forwarded-For into LOCAL_NETWORK")
+    void shouldIgnoreForwardedHeaderFromUntrustedPeer() {
+        // The direct peer is a public address (no trusted proxy in front), so the client-supplied
+        // X-Forwarded-For is ignored and the real remote address decides the group.
+        when(httpServletRequest.getRemoteAddr()).thenReturn("8.8.8.8");
+        when(httpServletRequest.getHeader(CommonConstants.X_FORWARDED_FOR)).thenReturn("192.168.1.1");
+
+        interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
+
+        assertEquals("8.8.8.8", attributes.get(CommonConstants.NETWORK_GROUP));
+    }
+
+    @Test
+    @DisplayName("Case 16: An external client behind our proxy is grouped by its real (rightmost) IP")
+    void shouldGroupExternalClientBehindProxyByRealIp() {
+        when(httpServletRequest.getRemoteAddr()).thenReturn("10.0.0.1"); // trusted proxy
+        when(httpServletRequest.getHeader(CommonConstants.X_FORWARDED_FOR))
+                .thenReturn("192.168.1.1, 8.8.8.8");
+
+        interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
+
+        assertEquals("8.8.8.8", attributes.get(CommonConstants.NETWORK_GROUP));
+    }
+
+    @Test
+    @DisplayName("Case 17: Should identify IPv4-mapped IPv6 private address as LOCAL_NETWORK")
+    void shouldIdentifyIpv4MappedIpv6AsLocal() {
+        when(httpServletRequest.getRemoteAddr()).thenReturn("::ffff:192.168.1.5");
+
+        interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
+
+        assertEquals(CommonConstants.LOCAL_NETWORK, attributes.get(CommonConstants.NETWORK_GROUP));
+    }
+
+    @Test
+    @DisplayName("Case 18: A degenerate X-Forwarded-For ',' from a trusted proxy falls back to the peer without throwing")
+    void shouldFallBackToRemoteAddrWhenForwardedHasOnlyBlankHops() {
+        // "," splits to an empty array; picking the last element used to throw AIOOBE. The proxy is
+        // trusted (loopback), so with no usable hop we must fall back to the direct peer address.
+        when(httpServletRequest.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(httpServletRequest.getHeader(CommonConstants.X_FORWARDED_FOR)).thenReturn(",");
+
+        interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
+
+        assertEquals(CommonConstants.LOCAL_NETWORK, attributes.get(CommonConstants.NETWORK_GROUP));
+    }
+
+    @Test
+    @DisplayName("Case 19: A trailing comma in X-Forwarded-For still yields the real rightmost hop, not a blank group")
+    void shouldSkipTrailingBlankHop() {
+        when(httpServletRequest.getRemoteAddr()).thenReturn("10.0.0.1"); // trusted proxy
+        when(httpServletRequest.getHeader(CommonConstants.X_FORWARDED_FOR)).thenReturn("192.168.1.1, 8.8.8.8, ");
+
+        interceptor.beforeHandshake(serverRequest, serverResponse, wsHandler, attributes);
+
+        assertEquals("8.8.8.8", attributes.get(CommonConstants.NETWORK_GROUP));
     }
 }

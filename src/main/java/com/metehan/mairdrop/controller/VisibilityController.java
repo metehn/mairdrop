@@ -1,6 +1,7 @@
 package com.metehan.mairdrop.controller;
 
 import com.metehan.mairdrop.service.DeviceService;
+import com.metehan.mairdrop.service.GroupBroadcaster;
 import com.metehan.mairdrop.service.RoomService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +10,6 @@ import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
-import java.util.List;
 import java.util.Map;
 
 @Controller
@@ -18,12 +18,14 @@ public class VisibilityController {
 
     private final DeviceService deviceService;
     private final RoomService roomService;
+    private final GroupBroadcaster groupBroadcaster;
     private final SimpMessagingTemplate messagingTemplate;
 
     public VisibilityController(DeviceService deviceService, RoomService roomService,
-                                SimpMessagingTemplate messagingTemplate) {
+                                GroupBroadcaster groupBroadcaster, SimpMessagingTemplate messagingTemplate) {
         this.deviceService = deviceService;
         this.roomService = roomService;
+        this.groupBroadcaster = groupBroadcaster;
         this.messagingTemplate = messagingTemplate;
     }
 
@@ -34,13 +36,10 @@ public class VisibilityController {
 
         String group = deviceService.getGroup(deviceId);
         deviceService.setHidden(deviceId, true);
-        broadcastGroup(group);
-
-        // Send the hiding device its updated peer list (it's now excluded from the loop above)
-        if (group != null) {
-            messagingTemplate.convertAndSend("/topic/devices/" + deviceId,
-                    deviceService.getActiveDevicesInGroup(group));
-        }
+        // broadcastGroup already notifies the hiding device itself (it stays in the recipient set
+        // but is excluded from the list payload), and it skips any device that is in a room — so a
+        // device auto-hiding on room join no longer has its room view clobbered by a self-send.
+        groupBroadcaster.broadcastGroup(group);
 
         messagingTemplate.convertAndSend("/topic/visibility/" + deviceId,
                 Map.of("type", "NETWORK_HIDDEN"));
@@ -54,7 +53,7 @@ public class VisibilityController {
 
         String group = deviceService.getGroup(deviceId);
         deviceService.setHidden(deviceId, false);
-        broadcastGroup(group);
+        groupBroadcaster.broadcastGroup(group);
 
         messagingTemplate.convertAndSend("/topic/visibility/" + deviceId,
                 Map.of("type", "NETWORK_VISIBLE"));
@@ -104,17 +103,6 @@ public class VisibilityController {
         messagingTemplate.convertAndSend("/topic/visibility/" + deviceId,
                 Map.of("type", "ROOM_VISIBLE", "roomCode", pendingRoom));
         log.info("Device {} visible in room {}", deviceId, pendingRoom);
-    }
-
-    private void broadcastGroup(String group) {
-        if (group == null) return;
-        List<String> devices = deviceService.getActiveDevicesInGroup(group);
-        for (String id : devices) {
-            // Skip devices in a room or hidden-from-room — their room view must not be overwritten
-            if (roomService.getRoomCode(id) == null && deviceService.getPendingRoomCode(id) == null) {
-                messagingTemplate.convertAndSend("/topic/devices/" + id, devices);
-            }
-        }
     }
 
     private String resolveDeviceId(SimpMessageHeaderAccessor h) {

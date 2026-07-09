@@ -1,15 +1,13 @@
 package com.metehan.mairdrop.config;
 
 import com.metehan.mairdrop.service.DeviceService;
+import com.metehan.mairdrop.service.GroupBroadcaster;
 import com.metehan.mairdrop.service.RoomService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
-
-import java.util.List;
 
 
 @Component
@@ -17,13 +15,13 @@ public class WebSocketEventListener {
     private static final Logger log = LoggerFactory.getLogger(WebSocketEventListener.class);
     private final DeviceService deviceService;
     private final RoomService roomService;
-    private final SimpMessagingTemplate messagingTemplate; // used for group broadcast on disconnect
+    private final GroupBroadcaster groupBroadcaster;
 
     public WebSocketEventListener(DeviceService deviceService, RoomService roomService,
-                                  SimpMessagingTemplate messagingTemplate) {
+                                  GroupBroadcaster groupBroadcaster) {
         this.deviceService = deviceService;
         this.roomService = roomService;
-        this.messagingTemplate = messagingTemplate;
+        this.groupBroadcaster = groupBroadcaster;
     }
 
     @EventListener
@@ -34,21 +32,24 @@ public class WebSocketEventListener {
         log.info("Connection lost! Session: {}, Device: {}", sessionId, deviceId);
 
         if (deviceId != null) {
+            String group = deviceService.getGroup(deviceId);
+
+            // Unregister first so a stale disconnect (one whose device already reconnected on a new
+            // session) is rejected here and does NOT go on to tear down the reconnected device's
+            // room membership below.
+            boolean removed = deviceService.unregisterDevice(deviceId, sessionId);
+            if (!removed) {
+                log.warn("Disconnect for {} ignored as stale; room and group state left intact", deviceId);
+                return;
+            }
+
             String roomCode = roomService.leaveRoom(deviceId);
             if (roomCode != null) {
                 roomService.broadcastRoomUpdate(roomCode);
             }
 
-            String group = deviceService.getGroup(deviceId);
-            deviceService.unregisterDevice(deviceId, sessionId);
-            if (group != null) {
-                List<String> visibleDevices = deviceService.getActiveDevicesInGroup(group);
-                List<String> allDevices = deviceService.getAllActiveDevicesInGroup(group);
-                log.info("Group [{}] being updated after disconnect..", group);
-                for (String id : allDevices) {
-                    messagingTemplate.convertAndSend("/topic/devices/" + id, visibleDevices);
-                }
-            }
+            log.info("Group [{}] being updated after disconnect..", group);
+            groupBroadcaster.broadcastGroup(group);
         }
     }
 }

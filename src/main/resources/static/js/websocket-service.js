@@ -1,6 +1,7 @@
 let stompClient = null;
 let activeSocket = null;
 let reconnectTimer = null;
+let registerPayload = null; // "deviceId|token" (or bare deviceId) reused for every (re)registration
 
 const STOMP_HEARTBEAT_MS = 10000;
 const RECONNECT_DELAY_MS = 3000;
@@ -23,6 +24,7 @@ const closePreviousSocket = () => {
 const SocketService = {
     connect: (deviceId, callbacks) => {
         closePreviousSocket();
+        registerPayload = callbacks.token ? (deviceId + '|' + callbacks.token) : deviceId;
 
         activeSocket = new SockJS('/ws');
         stompClient = Stomp.over(activeSocket);
@@ -66,13 +68,17 @@ const SocketService = {
                 }
             });
 
-            stompClient.send('/app/register', {}, deviceId);
-            if (callbacks.onRegistered) callbacks.onRegistered();
+            stompClient.send('/app/register', {}, registerPayload);
 
+            // Rejoin any saved room BEFORE re-asserting visibility. The server processes messages
+            // from one client in order (setPreserveReceiveOrder), so register → join → hide lands in
+            // the right sequence; sending a room-hide before the join would no-op (not in a room yet)
+            // and leave client and server disagreeing about visibility.
             const savedRoomId = sessionStorage.getItem('room_id');
             if (savedRoomId) {
                 stompClient.send('/app/rooms/join', {}, savedRoomId);
             }
+            if (callbacks.onRegistered) callbacks.onRegistered();
         };
 
         const onError = () => {
@@ -92,9 +98,9 @@ const SocketService = {
         }
     },
 
-    refreshDevices: (deviceId) => {
-        if (stompClient && stompClient.connected) {
-            stompClient.send('/app/register', {}, deviceId);
+    refreshDevices: () => {
+        if (stompClient && stompClient.connected && registerPayload) {
+            stompClient.send('/app/register', {}, registerPayload);
         }
     },
 

@@ -97,7 +97,7 @@ class RoomControllerTest {
         roomController.joinRoom("XXXXX", headerAccessor);
 
         verify(messagingTemplate).convertAndSend("/topic/room/" + deviceId,
-                Map.of("type", "ROOM_INVALID"));
+                Map.of("type", "ROOM_INVALID", "roomCode", "XXXXX"));
         verify(roomService, never()).broadcastRoomUpdate(any());
     }
 
