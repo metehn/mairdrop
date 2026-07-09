@@ -120,6 +120,11 @@ public class DeviceService {
         if (s != null) s.setHidden(hidden);
     }
 
+    public boolean isHidden(String deviceId) {
+        DeviceSession s = devices.get(deviceId);
+        return s != null && s.isHidden();
+    }
+
     public void setPendingRoomCode(String deviceId, String code) {
         DeviceSession s = devices.get(deviceId);
         if (s != null) s.setPendingRoomCode(code);
