@@ -1,5 +1,6 @@
 package com.metehan.mairdrop.config;
 
+import com.metehan.mairdrop.service.ConnectionIdentityRegistry;
 import com.metehan.mairdrop.service.DeviceService;
 import com.metehan.mairdrop.service.GroupBroadcaster;
 import com.metehan.mairdrop.service.RoomService;
@@ -25,6 +26,9 @@ class WebSocketEventListenerTest {
 
     @Mock
     private GroupBroadcaster groupBroadcaster;
+
+    @Mock
+    private ConnectionIdentityRegistry identityRegistry;
 
     @InjectMocks
     private WebSocketEventListener webSocketEventListener;

@@ -2,6 +2,7 @@ package com.metehan.mairdrop.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -17,6 +18,18 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     // Detects half-open TCP connections fast and triggers SessionDisconnectEvent
     // instead of waiting for OS-level TCP keepalive (which can take many minutes).
     private static final long HEARTBEAT_INTERVAL_MS = 10000L;
+
+    private final StompAuthChannelInterceptor stompAuthChannelInterceptor;
+
+    public WebSocketConfig(StompAuthChannelInterceptor stompAuthChannelInterceptor) {
+        this.stompAuthChannelInterceptor = stompAuthChannelInterceptor;
+    }
+
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        // Authorises CONNECT (device-id ownership) and SUBSCRIBE (own-topic only) frames.
+        registration.interceptors(stompAuthChannelInterceptor);
+    }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {

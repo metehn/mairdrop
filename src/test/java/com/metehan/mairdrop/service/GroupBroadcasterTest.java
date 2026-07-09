@@ -72,16 +72,17 @@ class GroupBroadcasterTest {
     }
 
     @Test
-    @DisplayName("a hidden-from-room (pending) device is also skipped")
-    void shouldSkipDeviceWithPendingRoom() {
+    @DisplayName("a hidden-from-room (pending) device STILL receives updates — it shows the network view")
+    void shouldNotSkipDeviceWithPendingRoom() {
         List<String> visible = List.of("dev1", "dev2");
         when(deviceService.getActiveDevicesInGroup(group)).thenReturn(visible);
         when(deviceService.getAllActiveDevicesInGroup(group)).thenReturn(List.of("dev1", "dev2"));
-        lenient().when(deviceService.getPendingRoomCode("dev2")).thenReturn("ABCDE");
+        // dev2 hid from its room (pending). Having left the room it displays the network list, so a
+        // network broadcast must reach it — otherwise its list goes stale until it rejoins.
 
         groupBroadcaster.broadcastGroup(group);
 
         verify(messagingTemplate).convertAndSend("/topic/devices/dev1", visible);
-        verify(messagingTemplate, never()).convertAndSend(eq("/topic/devices/dev2"), anyList());
+        verify(messagingTemplate).convertAndSend("/topic/devices/dev2", visible);
     }
 }

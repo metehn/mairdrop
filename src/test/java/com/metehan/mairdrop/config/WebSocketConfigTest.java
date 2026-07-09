@@ -1,10 +1,13 @@
 package com.metehan.mairdrop.config;
 
+import com.metehan.mairdrop.util.CommonConstants;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.springframework.web.socket.sockjs.client.SockJsClient;
@@ -29,8 +32,13 @@ class WebSocketConfigTest {
 
         String url = "ws://localhost:" + port + "/ws";
 
+        // A device id is required on CONNECT now that the auth interceptor binds it to the session.
+        StompHeaders connectHeaders = new StompHeaders();
+        connectHeaders.add(CommonConstants.HEADER_DEVICE_ID, "dev_configtest");
+        connectHeaders.add(CommonConstants.HEADER_TOKEN, "tok_configtest");
+
         StompSession stompSession = stompClient
-                .connectAsync(url, new StompSessionHandlerAdapter() {})
+                .connectAsync(url, new WebSocketHttpHeaders(), connectHeaders, new StompSessionHandlerAdapter() {})
                 .get(5, TimeUnit.SECONDS);
 
         assertTrue(stompSession.isConnected(), "A WebSocket connection must be established.");

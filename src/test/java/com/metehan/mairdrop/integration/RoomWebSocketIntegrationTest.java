@@ -2,6 +2,7 @@ package com.metehan.mairdrop.integration;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.metehan.mairdrop.util.CommonConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import org.springframework.messaging.simp.stomp.StompFrameHandler;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 
@@ -148,6 +150,61 @@ class RoomWebSocketIntegrationTest {
                 "Room member B's device list must not be overwritten by an unrelated network broadcast");
     }
 
+    @Test
+    @DisplayName("bug: a device hidden from its room (showing the network view) still receives network updates")
+    void hiddenFromRoomDeviceKeepsReceivingNetworkUpdates() throws Exception {
+        TestDevice a = newDevice();
+        TestDevice b = newDevice();
+        a.awaitDeviceList(l -> l.containsAll(List.of(a.deviceId, b.deviceId)), "initial registration");
+        b.awaitDeviceList(l -> l.containsAll(List.of(a.deviceId, b.deviceId)), "initial registration");
+
+        // A creates a room, then hides from it: A has left the room and now displays the network
+        // list rather than a room roster.
+        a.send("/app/rooms/create", "");
+        a.nextRoomEvent();
+        a.send("/app/visibility/room/hide", "");
+        assertEquals("ROOM_HIDDEN", a.nextVisibilityEvent().get("type"));
+        a.awaitDeviceList(l -> l.containsAll(List.of(a.deviceId, b.deviceId)), "network list after hiding from room");
+
+        // A new device joins the network. A, though hidden from its (now-empty) room, must still get
+        // the refreshed network list — otherwise its list is frozen until it rejoins the room.
+        TestDevice c = newDevice();
+        a.awaitDeviceList(l -> l.contains(c.deviceId),
+                "network update after C joins must reach a device that is hidden from its room");
+    }
+
+    @Test
+    @DisplayName("security: a session cannot subscribe to another device's topic to eavesdrop")
+    void cannotSubscribeToAnotherDevicesTopic() throws Exception {
+        TestDevice victim = newDevice();
+        victim.awaitDeviceList(l -> l.contains(victim.deviceId), "victim registered");
+
+        // The attacker connects as its own device, then tries to listen on the victim's device-list
+        // topic. The auth interceptor must refuse the subscription so no victim data is delivered.
+        WebSocketStompClient client = new WebSocketStompClient(new StandardWebSocketClient());
+        client.setMessageConverter(new CompositeMessageConverter(
+                List.of(new StringMessageConverter(), TestDevice.rawByteArrayConverter())));
+        StompHeaders connectHeaders = new StompHeaders();
+        connectHeaders.add(CommonConstants.HEADER_DEVICE_ID, "dev_attacker");
+        connectHeaders.add(CommonConstants.HEADER_TOKEN, "tok-attacker");
+        StompSession attacker = client.connectAsync("ws://127.0.0.1:" + port + "/ws/websocket",
+                        new WebSocketHttpHeaders(), connectHeaders, new StompSessionHandlerAdapter() { })
+                .get(5, TimeUnit.SECONDS);
+
+        BlockingQueue<String> stolen = new LinkedBlockingQueue<>();
+        try {
+            attacker.subscribe("/topic/devices/" + victim.deviceId, TestDevice.frameHandler(stolen));
+        } catch (Exception ignored) {
+            // A rejected subscription may surface as a client-side error; that is an acceptable outcome.
+        }
+
+        // Cause a broadcast to the victim (a new device joining refreshes the victim's list).
+        newDevice();
+
+        assertNull(stolen.poll(2, TimeUnit.SECONDS),
+                "attacker must not receive the victim's device list from a foreign subscription");
+    }
+
     private TestDevice newDevice() throws Exception {
         TestDevice device = new TestDevice(objectMapper);
         device.connectAndRegister(port);
@@ -177,7 +234,13 @@ class RoomWebSocketIntegrationTest {
                     List.of(new StringMessageConverter(), rawByteArrayConverter())));
 
             String url = "ws://127.0.0.1:" + port + "/ws/websocket";
-            session = stompClient.connectAsync(url, new StompSessionHandlerAdapter() {})
+            // The auth interceptor binds this device id to the session on CONNECT; a device only
+            // ever subscribes to its own topics below, which is what the interceptor now enforces.
+            StompHeaders connectHeaders = new StompHeaders();
+            connectHeaders.add(CommonConstants.HEADER_DEVICE_ID, deviceId);
+            connectHeaders.add(CommonConstants.HEADER_TOKEN, "tok-" + deviceId);
+            session = stompClient.connectAsync(url, new WebSocketHttpHeaders(), connectHeaders,
+                            new StompSessionHandlerAdapter() {})
                     .get(5, TimeUnit.SECONDS);
 
             session.subscribe("/topic/devices/" + deviceId, frameHandler(deviceListFrames));

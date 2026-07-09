@@ -89,7 +89,14 @@ const SocketService = {
             );
         };
 
-        stompClient.connect({}, onConnected, onError);
+        // Identify the connection up front so the server can bind this device id to the session
+        // (proving ownership with the token) and reject any attempt to subscribe to another
+        // device's topics. The token is the same secret used for registration; it is never shared
+        // with peers.
+        const connectHeaders = callbacks.token
+            ? { deviceId: deviceId, token: callbacks.token }
+            : { deviceId: deviceId };
+        stompClient.connect(connectHeaders, onConnected, onError);
     },
 
     sendSignal: (type, data) => {

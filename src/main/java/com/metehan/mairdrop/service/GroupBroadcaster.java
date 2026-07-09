@@ -25,11 +25,11 @@ public class GroupBroadcaster {
     }
 
     /**
-     * Publishes the group's visible-device list to every active member of the group, skipping any
-     * device that is currently in a public room or hidden-from-room — those devices display a
-     * room-scoped list that a network broadcast must not overwrite. Hidden-from-network devices are
-     * still notified: they stay on the page and need to see the network list even while invisible
-     * to others.
+     * Publishes the group's visible-device list to every active member of the group, skipping only
+     * devices that are currently in a public room — those display a room-scoped list a network
+     * broadcast must not overwrite. A device that hid from its room shows the network list, so it is
+     * still notified. Hidden-from-network devices are notified too: they stay on the page and need
+     * to see the network list even while invisible to others.
      */
     public void broadcastGroup(String group) {
         if (group == null) {
@@ -37,7 +37,10 @@ public class GroupBroadcaster {
         }
         List<String> visibleDevices = deviceService.getActiveDevicesInGroup(group);
         for (String id : deviceService.getAllActiveDevicesInGroup(group)) {
-            if (roomService.getRoomCode(id) == null && deviceService.getPendingRoomCode(id) == null) {
+            // Skip only devices that are actively in a room — they display a room-scoped roster a
+            // network broadcast must not overwrite. A device that hid FROM its room is showing the
+            // network list, so it must keep receiving these updates or that list goes stale.
+            if (roomService.getRoomCode(id) == null) {
                 messagingTemplate.convertAndSend("/topic/devices/" + id, visibleDevices);
             }
         }
